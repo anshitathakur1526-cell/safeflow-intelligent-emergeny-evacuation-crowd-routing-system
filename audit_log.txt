@@ -10,3 +10,6 @@
 [2026-10-31 16:15:26] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Room_101
 [2026-10-31 16:19:35] User: admin | Action: LOGIN | Details: Successful login
 [2026-10-31 16:22:48] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Corridor_B
+[2026-10-31 16:31:15] User: admin | Action: LOGIN | Details: Successful login
+[2026-10-31 16:31:20] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Corridor_B
+[2026-10-31 16:31:25] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Room_101
