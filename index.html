@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeFlow - Hospital Emergency Evacuation</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Roboto', 'Segoe UI', sans-serif; }
+        body { background: #f0f2f5; }
+        
+        header { background: #4285F4; color: white; padding: 12px 25px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+        header h1 { font-size: 20px; font-weight: 500; }
+        header h1 i { margin-right: 10px; color: #EA4335; }
+        .status-badge { background: #34A853; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+
+        .container { display: flex; height: calc(100vh - 50px); }
+        
+        .sidebar { width: 360px; background: white; padding: 20px; overflow-y: auto; box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 10; }
+        
+        .section-title { font-size: 14px; font-weight: 600; color: #202124; margin: 18px 0 12px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+        .section-title:first-child { margin-top: 0; }
+        
+        .input-group { margin-bottom: 12px; }
+        .input-group label { display: block; font-weight: 500; margin-bottom: 5px; color: #5f6368; font-size: 13px; }
+        .input-group input, .input-group select { 
+            width: 100%; padding: 10px 12px; border: 1px solid #dadce0; border-radius: 8px; 
+            font-size: 14px; background: #f8f9fa; transition: 0.2s;
+        }
+        .input-group input:focus, .input-group select:focus { 
+            border-color: #4285F4; outline: none; background: white; 
+            box-shadow: 0 0 0 2px rgba(66,133,244,0.2);
+        }
+
+        .btn-main { 
+            width: 100%; padding: 14px; 
+            background: #EA4335; color: white; border: none; border-radius: 8px; 
+            font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; 
+            margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 2px 6px rgba(234,67,53,0.3);
+        }
+        .btn-main:hover { background: #d33426; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(234,67,53,0.4); }
+
+        .result-box { margin-top: 20px; padding: 16px; border-radius: 8px; display: none; }
+        .result-box.safe { background: #E6F4EA; border: 1px solid #34A853; }
+        .result-box.danger { background: #FCE8E6; border: 1px solid #EA4335; }
+        
+        .result-box h3 { font-size: 16px; margin-bottom: 12px; color: #202124; }
+        .stat-row { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; font-size: 14px; color: #5f6368; }
+        .stat-val { font-weight: 600; color: #202124; }
+        .status-badge-large { padding: 4px 12px; border-radius: 12px; font-weight: 700; font-size: 12px; text-transform: uppercase; }
+        .badge-safe { background: #34A853; color: white; }
+        .badge-danger { background: #EA4335; color: white; }
+
+        .map-area { flex: 1; position: relative; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+
+        /* Google Maps-like zoom controls */
+        .leaflet-control-zoom { border: none !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; }
+        .leaflet-control-zoom a { 
+            background: white !important; color: #202124 !important; 
+            border: none !important; width: 36px !important; height: 36px !important; 
+            line-height: 36px !important; font-size: 18px !important;
+        }
+        .leaflet-control-zoom a:hover { background: #f1f3f4 !important; }
+
+        .map-legend {
+            position: absolute; bottom: 30px; right: 20px; background: white; padding: 14px 18px; 
+            border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; font-size: 13px;
+            border: 1px solid #dadce0;
+        }
+        .legend-item { display: flex; align-items: center; margin: 8px 0; color: #202124; }
+        .legend-color { width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; }
+
+        .route-text-box { 
+            background: white; padding: 10px 12px; border-radius: 6px; 
+            font-weight: 600; color: #EA4335; margin-top: 8px; font-size: 14px;
+            border: 1px solid #dadce0;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1><i class="fas fa-hospital"></i> SafeFlow Emergency Evacuation</h1>
+    <div class="status-badge"><i class="fas fa-circle" style="font-size: 8px;"></i> Live Monitoring</div>
+</header>
+
+<div class="container">
+    <div class="sidebar">
+        <div class="section-title">📍 Location Details</div>
+        
+        <div class="input-group">
+            <label>📍 Current Location</label>
+            <input type="text" id="start_address" placeholder="Search location..." value="AIIMS Delhi">
+        </div>
+        
+        <div class="input-group">
+            <label>🚪 Emergency Exit / Safe Zone</label>
+            <input type="text" id="exit_address" placeholder="Search exit location..." value="Safdarjung Hospital, Delhi">
+        </div>
+
+        <div class="section-title">🚨 Emergency Parameters</div>
+        
+        <div class="input-group">
+            <label>Emergency Type</label>
+            <select id="emergency_type">
+                <option value="fire">🔥 Fire Emergency</option>
+                <option value="earthquake">🌍 Earthquake</option>
+                <option value="crowd" selected>👥 Overcrowding</option>
+                <option value="chemical">☣️ Chemical Spill</option>
+            </select>
+        </div>
+        
+        <div class="input-group">
+            <label>Crowd Density (People)</label>
+            <input type="number" id="sensor_capacity" value="50">
+        </div>
+
+        <button class="btn-main" onclick="analyzeEmergency()">
+            <i class="fas fa-route"></i> ANALYZE & FIND SAFE ROUTE
+        </button>
+
+        <div id="result_box" class="result-box">
+            <h3 id="result_title">📊 Analysis Result</h3>
+            <div class="stat-row">
+                <span>Safety Status</span>
+                <span id="safety_status" class="status-badge-large">-</span>
+            </div>
+            <div class="stat-row"><span>📏 Distance</span> <span class="stat-val" id="evac_dist">-</span></div>
+            <div class="stat-row"><span>⏱️ Evacuation Time</span> <span class="stat-val" id="evac_time">-</span></div>
+            <div class="stat-row"><span>🤖 AI Crowd Prediction</span> <span class="stat-val" id="ai_crowd">-</span></div>
+            <div class="stat-row" style="align-items: flex-start;"><span>🛣️ Route</span></div>
+            <div class="route-text-box" id="route_text">-</div>
+        </div>
+    </div>
+
+    <div class="map-area">
+        <div id="map"></div>
+        <div class="map-legend">
+            <div class="legend-item"><div class="legend-color" style="background: #34A853;"></div>Safe Zone</div>
+            <div class="legend-item"><div class="legend-color" style="background: #EA4335;"></div>Danger Zone</div>
+            <div class="legend-item"><div style="width: 25px; height: 3px; background: #4285F4; margin-right: 10px; border-radius: 2px;"></div>Safe Route</div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // ESRI WORLD STREET MAP - Looks EXACTLY like Google Maps!
+    // Free, no API key, never blocks
+    var map = L.map('map', {
+        zoomControl: false  // We'll add it on the right like Google Maps
+    }).setView([28.5672, 77.2100], 13);
+
+    // Add zoom control on the right side (like Google Maps)
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    // Esri World Street Map tiles - Google Maps clone!
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '© Esri © OpenStreetMap',
+        maxZoom: 19
+    }).addTo(map);
+
+    var markers = [];
+    var lines = [];
+    var zones = [];
+
+    async function getCoords(addr) {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}`);
+        const data = await res.json();
+        return data.length > 0 ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), name: data[0].display_name.split(',')[0] } : null;
+    }
+
+    function getDist(lat1, lon1, lat2, lon2) {
+        var R = 6371; 
+        var dLat = (lat2-lat1) * Math.PI/180;  
+        var dLon = (lon2-lon1) * Math.PI/180; 
+        var a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2; 
+        return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))) * 1000;
+    }
+
+    function speakAlert(text) {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+        }
+    }
+
+    async function analyzeEmergency() {
+        const startAddr = document.getElementById('start_address').value;
+        const exitAddr = document.getElementById('exit_address').value;
+        
+        if(!startAddr || !exitAddr) return alert("Please enter both locations!");
+
+        markers.forEach(m => map.removeLayer(m)); markers = [];
+        lines.forEach(l => map.removeLayer(l)); lines = [];
+        zones.forEach(z => map.removeLayer(z)); zones = [];
+
+        const startCoords = await getCoords(startAddr);
+        const exitCoords = await getCoords(exitAddr);
+        
+        if(!startCoords || !exitCoords) return alert("Location not found! Check spelling.");
+
+        const distance = getDist(startCoords.lat, startCoords.lng, exitCoords.lat, exitCoords.lng);
+        
+        let crowdPrediction = "Low";
+        let crowdFactor = 1.0;
+        try {
+            const res = await fetch('http://127.0.0.1:5000/smart_route', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ 
+                    room_id: 10, time_of_day: 'Evening', is_emergency: 1, 
+                    sensor_capacity: parseInt(document.getElementById('sensor_capacity').value), 
+                    start_node: 1, end_node: 4 
+                })
+            });
+            const data = await res.json();
+            crowdPrediction = data.predicted_crowd || "Low";
+            if(crowdPrediction === 'High') crowdFactor = 2.5;
+            else if(crowdPrediction === 'Medium') crowdFactor = 1.5;
+        } catch(e) { 
+            crowdPrediction = "Low (Server Offline)"; 
+            crowdFactor = 1.0; 
+        }
+
+        const speed = 1.2 / crowdFactor;
+        const timeSeconds = distance / speed;
+        const timeMinutes = (timeSeconds / 60).toFixed(1);
+        const isSafe = distance < 2000 && crowdFactor < 2;
+
+        // Danger Zone at start if high crowd
+        if(crowdFactor >= 2) {
+            const dangerZone = L.circle([startCoords.lat, startCoords.lng], {
+                color: '#EA4335', fillColor: '#EA4335', fillOpacity: 0.3, radius: 600, weight: 2
+            }).addTo(map).bindPopup("🔴 <b>DANGER ZONE</b><br>High Crowd Detected!<br>Evacuate immediately!");
+            zones.push(dangerZone);
+        }
+
+        // Safe Zone at exit
+        const safeZone = L.circle([exitCoords.lat, exitCoords.lng], {
+            color: '#34A853', fillColor: '#34A853', fillOpacity: 0.3, radius: 500, weight: 2
+        }).addTo(map).bindPopup("🟢 <b>SAFE ZONE</b><br>Emergency Exit Point<br>" + exitCoords.name);
+        zones.push(safeZone);
+
+        // Google Maps-style markers
+        const startIcon = L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background:#FBBC04;width:40px;height:40px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;"><span style="transform:rotate(45deg);font-size:20px;">📍</span></div>',
+            iconSize: [40, 40],
+            iconAnchor: [20, 40]
+        });
+        const exitIcon = L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background:#34A853;width:40px;height:40px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;"><span style="transform:rotate(45deg);font-size:20px;">🚪</span></div>',
+            iconSize: [40, 40],
+            iconAnchor: [20, 40]
+        });
+
+        const startMarker = L.marker([startCoords.lat, startCoords.lng], {icon: startIcon})
+            .addTo(map).bindPopup('<b>📍 Current Location</b><br>' + startCoords.name).openPopup();
+        markers.push(startMarker);
+
+        const exitMarker = L.marker([exitCoords.lat, exitCoords.lng], {icon: exitIcon})
+            .addTo(map).bindPopup('<b>🚪 Safe Exit</b><br>' + exitCoords.name);
+        markers.push(exitMarker);
+
+        // Blue route line (like Google Maps directions)
+        const routeLine = L.polyline(
+            [[startCoords.lat, startCoords.lng], [exitCoords.lat, exitCoords.lng]], 
+            {color: '#4285F4', weight: 6, opacity: 0.8}
+        ).addTo(map).bindPopup('<b>🛣️ Safe Evacuation Route</b><br>Follow this path!');
+        lines.push(routeLine);
+
+        const group = new L.featureGroup(markers);
+        map.fitBounds(group.getBounds().pad(0.3));
+
+        // Update results
+        const resultBox = document.getElementById('result_box');
+        resultBox.style.display = 'block';
+        resultBox.className = 'result-box ' + (isSafe ? 'safe' : 'danger');
+        
+        document.getElementById('result_title').innerText = isSafe ? '✅ Area is SAFE for Evacuation' : '⚠️ CAUTION - High Risk Area';
+        
+        const statusEl = document.getElementById('safety_status');
+        statusEl.innerText = isSafe ? 'SAFE' : 'DANGER';
+        statusEl.className = 'status-badge-large ' + (isSafe ? 'badge-safe' : 'badge-danger');
+        
+        document.getElementById('evac_dist').innerText = (distance/1000).toFixed(2) + ' km';
+        document.getElementById('evac_time').innerText = timeMinutes + ' minutes';
+        document.getElementById('ai_crowd').innerText = crowdPrediction;
+        document.getElementById('route_text').innerText = startCoords.name + ' → ' + exitCoords.name;
+
+        const voiceMsg = isSafe 
+            ? 'Area is safe. Route to ' + exitCoords.name + ' is ' + (distance/1000).toFixed(2) + ' kilometers. Estimated time is ' + timeMinutes + ' minutes.'
+            : 'Warning! High crowd detected. This is a danger zone. Evacuate immediately to ' + exitCoords.name + '. Estimated time is ' + timeMinutes + ' minutes.';
+        
+        speakAlert(voiceMsg);
+    }
+</script>
+</body>
+</html>
