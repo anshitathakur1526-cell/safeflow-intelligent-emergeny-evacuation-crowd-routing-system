@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeFlow - Emergency Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Layout Fixes to stop overlapping */
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+        .login-section { margin-top: 20px; }
+        input, button { padding: 10px; margin: 5px; border-radius: 4px; border: 1px solid #ccc; }
+        button { background: #007bff; color: white; cursor: pointer; border: none; }
+        button:hover { background: #0056b3; }
+        
+        .control-panel { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #ddd; }
+        .map-display { margin-bottom: 20px; position: relative; z-index: 1; }
+        .route-info { background: #d4edda; padding: 15px; border-radius: 8px; border-left: 5px solid #28a745; margin-top: 20px; }
+
+        /* Map Container Styles */
+        .map-container { 
+            position: relative; 
+            width: 100%; 
+            height: 400px; 
+            background: #e9ecef; 
+            border: 2px solid #333; 
+            border-radius: 8px; 
+            overflow: hidden; 
+        }
+        
+        /* Map Elements */
+        .node {
+            position: absolute;
+            width: 30px; height: 30px;
+            border-radius: 50%;
+            background: #4CAF50;
+            color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: bold;
+            z-index: 10;
+            transform: translate(-50%, -50%); /* Centers the node exactly on coordinates */
+        }
+        .node.exit { background: #2196F3; }
+        .node.fire { background: #f44336; animation: pulse 1s infinite; border: 2px solid darkred; }
+        .node.route { background: #FF9800; }
+        
+        .corridor {
+            position: absolute;
+            height: 4px;
+            background: #999;
+            transform-origin: 0 0;
+            z-index: 5;
+        }
+        .corridor.active { background: #FF9800; height: 6px; }
+        .corridor.blocked { background: #f44336; height: 6px; border-top: 1px dashed black; }
+        
+        @keyframes pulse { 
+            0%, 100% { transform: translate(-50%, -50%) scale(1); } 
+            50% { transform: translate(-50%, -50%) scale(1.3); } 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚨 SafeFlow Intelligent Evacuation System</h1>
+            <div id="user-info">Not Logged In</div>
+        </header>
+
+        <div class="login-section" id="login-section">
+            <h2>Login</h2>
+            <input type="text" id="username" placeholder="Username (admin/warden/occupant)">
+            <input type="password" id="password" placeholder="Password">
+            <button onclick="login()">Login</button>
+        </div>
+
+        <div class="dashboard-section" id="dashboard-section" style="display:none;">
+            <div class="control-panel">
+                <h3>Emergency Controls</h3>
+                <button onclick="triggerEmergency('Room_101')">🔥 Simulate Fire (Room 101)</button>
+                <button onclick="triggerEmergency('Corridor_B')">🚧 Block Corridor B</button>
+                <button onclick="resetMap()" style="background: #6c757d;">🔄 Reset Map</button>
+            </div>
+
+            <div class="map-display">
+                <h3>Live Evacuation Map</h3>
+                <div class="map-container" id="map-canvas">
+                    <!-- Map will be drawn here -->
+                </div>
+            </div>
+
+            <div class="route-info">
+                <h3>Recommended Route</h3>
+                <p id="route-output">Login to see routes.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let authToken = null;
+        let currentEmergency = null;
+
+        // Building layout definition
+        const buildingLayout = {
+            nodes: [
+                { id: 'Room_101', x: 80, y: 60, type: 'room' },
+                { id: 'Room_102', x: 200, y: 60, type: 'room' },
+                { id: 'Corridor_A', x: 80, y: 150, type: 'corridor' },
+                { id: 'Corridor_B', x: 200, y: 150, type: 'corridor' },
+                { id: 'Stair_1', x: 80, y: 250, type: 'stair' },
+                { id: 'Stair_2', x: 200, y: 250, type: 'stair' },
+                { id: 'EXIT_MAIN', x: 80, y: 340, type: 'exit' },
+                { id: 'EXIT_BACK', x: 200, y: 340, type: 'exit' }
+            ],
+            edges: [
+                { from: 'Room_101', to: 'Corridor_A' },
+                { from: 'Room_102', to: 'Corridor_B' },
+                { from: 'Corridor_A', to: 'Corridor_B' },
+                { from: 'Corridor_A', to: 'Stair_1' },
+                { from: 'Corridor_B', to: 'Stair_2' },
+                { from: 'Stair_1', to: 'EXIT_MAIN' },
+                { from: 'Stair_2', to: 'EXIT_BACK' }
+            ]
+        };
+
+        function drawMap(route = [], emergency = null) {
+            const mapCanvas = document.getElementById('map-canvas');
+            mapCanvas.innerHTML = '';
+
+            // 1. Draw corridors (edges) first so they are behind nodes
+            buildingLayout.edges.forEach(edge => {
+                const fromNode = buildingLayout.nodes.find(n => n.id === edge.from);
+                const toNode = buildingLayout.nodes.find(n => n.id === edge.to);
+                
+                const isRoute = route.includes(edge.from) && route.includes(edge.to);
+                const isBlocked = emergency === edge.from || emergency === edge.to;
+                
+                const corridor = document.createElement('div');
+                corridor.className = 'corridor';
+                if (isBlocked) corridor.classList.add('blocked');
+                else if (isRoute) corridor.classList.add('active');
+                
+                const dx = toNode.x - fromNode.x;
+                const dy = toNode.y - fromNode.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+                
+                corridor.style.width = length + 'px';
+                corridor.style.left = fromNode.x + 'px';
+                corridor.style.top = fromNode.y + 'px';
+                corridor.style.transform = `rotate(${angle}deg)`;
+                
+                mapCanvas.appendChild(corridor);
+            });
+
+            // 2. Draw nodes
+            buildingLayout.nodes.forEach(node => {
+                const nodeDiv = document.createElement('div');
+                nodeDiv.className = 'node';
+                
+                if (node.type === 'exit') nodeDiv.classList.add('exit');
+                if (route.includes(node.id)) nodeDiv.classList.add('route');
+                if (emergency === node.id) nodeDiv.classList.add('fire');
+                
+                nodeDiv.style.left = node.x + 'px';
+                nodeDiv.style.top = node.y + 'px';
+                nodeDiv.textContent = node.id.split('_')[0].substring(0, 3);
+                nodeDiv.title = node.id;
+                
+                mapCanvas.appendChild(nodeDiv);
+            });
+        }
+
+        function resetMap() {
+            currentEmergency = null;
+            drawMap(['Room_101', 'Corridor_A', 'Stair_1', 'EXIT_MAIN'], null);
+            document.getElementById('route-output').innerText = 'Safest Path: Room_101 -> Corridor_A -> Stair_1 -> EXIT_MAIN | Cost: 100 | ML: Active';
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: username, password: password})
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    authToken = data.token;
+                    document.getElementById('login-section').style.display = 'none';
+                    document.getElementById('dashboard-section').style.display = 'block';
+                    document.getElementById('user-info').innerText = 'Logged in as: ' + username + ' (' + data.role + ')';
+                    resetMap(); // Draw initial map
+                } else {
+                    alert('Login Failed: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Connection error!');
+            }
+        }
+
+        async function triggerEmergency(location) {
+            if (!authToken) return alert('Please login first');
+            
+            currentEmergency = location;
+            const sensorData = {location: location, severity: 'high'};
+            const signature = "demo_signature";
+
+            try {
+                const response = await fetch('/emergency', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + authToken
+                    },
+                    body: JSON.stringify({
+                        location: location,
+                        sensor_data: sensorData,
+                        signature: signature
+                    })
+                });
+                const data = await response.json();
+                alert(data.message);
+                
+                // Update map visually
+                drawMap(['Room_101', 'Corridor_A', 'Stair_1', 'EXIT_MAIN'], location);
+                
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

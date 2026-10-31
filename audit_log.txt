@@ -1,0 +1,12 @@
+[2026-10-31 16:03:01] User: admin | Action: LOGIN | Details: Successful login
+[2026-10-31 16:03:50] User: admin | Action: BLOCKED | Details: Fake sensor signature detected!
+[2026-10-31 16:03:57] User: admin | Action: BLOCKED | Details: Fake sensor signature detected!
+[2026-10-31 16:09:31] User: admin | Action: LOGIN | Details: Successful login
+[2026-10-31 16:09:40] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Room_101
+[2026-10-31 16:12:49] User: admin | Action: LOGIN | Details: Successful login
+[2026-10-31 16:13:01] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Room_101
+[2026-10-31 16:13:09] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Room_101
+[2026-10-31 16:14:48] User: admin | Action: LOGIN | Details: Successful login
+[2026-10-31 16:15:26] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Room_101
+[2026-10-31 16:19:35] User: admin | Action: LOGIN | Details: Successful login
+[2026-10-31 16:22:48] User: admin | Action: EMERGENCY_TRIGGER | Details: Fire at Corridor_B
