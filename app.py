@@ -1,93 +1,119 @@
-# app.py - Main Flask Application (Fixed Version)
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-import joblib
+import sqlite3
+import sys
+import os
 
-# Core DSA functions import
-from core.routing import get_graph_from_db, dijkstra
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'aiml')))
+from predict import predict_crowd
 
-# Security module import
-from security import generate_token, token_required, verify_sensor_data, audit_log, USERS
+from database import init_db
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'core')))
+from routing import dijkstra, get_graph_from_db
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # CORS enable kiya
 
-# Load AIML Model
-try:
-    ml_model = joblib.load('aiml/data/safeflow_model.pkl')
-    print("✅ ML Model loaded successfully")
-except Exception as e:
-    ml_model = None
-    print(f"⚠️ ML Model not found. Error: {e}")
+with app.app_context():
+    init_db()
+    print("✅ Database Connected Successfully!")
 
 @app.route('/')
 def home():
-    return render_template('dashboard.html')
+    return "SafeFlow Server is Running!"
 
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    
-    if username in USERS and USERS[username]['password'] == password:
-        token = generate_token(username)
-        audit_log("LOGIN", username, "Successful login")
-        return jsonify({'token': token, 'role': USERS[username]['role']}), 200
-    
-    return jsonify({'message': 'Invalid credentials'}), 401
-
-@app.route('/emergency', methods=['POST'])
-@token_required
-def trigger_emergency(current_user, current_role):
-    if current_role not in ['admin', 'warden']:
-        return jsonify({'message': 'Access Denied'}), 403
-
-    data = request.json
-    sensor_payload = str(data.get('sensor_data', {}))
-    signature = data.get('signature', '')
-
-    if not verify_sensor_data(sensor_payload, signature):
-        audit_log("BLOCKED", current_user, "Fake sensor signature detected!")
-        return jsonify({'message': '⚠️ Security Alert: Spoofed sensor data rejected!'}), 400
-
-    location = data.get('location')
-    audit_log("EMERGENCY_TRIGGER", current_user, f"Fire at {location}")
-    return jsonify({'message': f'Emergency activated at {location}. Rerouting...'}), 200
-
-@app.route('/route/<start_node>', methods=['GET'])
-def get_route(start_node):
+@app.route('/predict', methods=['POST'])
+def predict():
     try:
-        graph = get_graph_from_db()
-        result = dijkstra(graph, start_node, 'EXIT_MAIN')
-        
-        # Handle tuple return properly
-        if isinstance(result, tuple):
-            if len(result) == 2:
-                route, total_cost = result
-            else:
-                route = result[0]
-                total_cost = result[1] if len(result) > 1 else 100
-        else:
-            route = result
-            total_cost = 100
-        
-        # Ensure route is a list
-        if not isinstance(route, list):
-            route = [start_node, 'Corridor_A', 'EXIT_MAIN']
-            total_cost = 100
-            
+        data = request.get_json()
+        room_id = data.get('room_id')
+        time_of_day = data.get('time_of_day')
+        is_emergency = data.get('is_emergency')
+        sensor_capacity = data.get('sensor_capacity')
+        result = predict_crowd(room_id, time_of_day, is_emergency, sensor_capacity)
+        return jsonify({"status": "success", "prediction": result})
     except Exception as e:
-        route = [start_node, 'Corridor_A', 'EXIT_MAIN']
-        total_cost = 100
-        print(f"Route Error: {e}")
-    
-    return jsonify({
-        'route': route,
-        'total_cost': total_cost,
-        'ml_status': 'Active' if ml_model else 'Fallback Mode'
-    })
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/nodes', methods=['GET'])
+def get_nodes():
+    try:
+        conn = sqlite3.connect('safeflow.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM nodes')
+        nodes = cursor.fetchall()
+        conn.close()
+        nodes_list = [{"id": n[0], "name": n[1], "floor": n[2], "is_exit": n[3]} for n in nodes]
+        return jsonify({"status": "success", "nodes": nodes_list})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/edges', methods=['GET'])
+def get_edges():
+    try:
+        conn = sqlite3.connect('safeflow.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM edges')
+        edges = cursor.fetchall()
+        conn.close()
+        edges_list = [{"id": e[0], "from_node": e[1], "to_node": e[2], "distance": e[3]} for e in edges]
+        return jsonify({"status": "success", "edges": edges_list})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/route', methods=['POST'])
+def get_route():
+    try:
+        data = request.get_json()
+        start_node = data.get('start_node')
+        end_node = data.get('end_node')
+        graph, nodes = get_graph_from_db()
+        cost, path = dijkstra(graph, start_node, end_node)
+        if path:
+            path_names = [nodes.get(n, f"Unknown({n})") for n in path]
+            return jsonify({"status": "success", "path": path_names, "total_distance": cost})
+        else:
+            return jsonify({"status": "error", "message": "No path found!"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/block_path', methods=['POST'])
+def block_path():
+    try:
+        data = request.get_json()
+        n1 = data.get('from_node')
+        n2 = data.get('to_node')
+        conn = sqlite3.connect('safeflow.db')
+        cursor = conn.cursor()
+        cursor.execute('UPDATE edges SET distance = 99999 WHERE (from_node=? AND to_node=?) OR (from_node=? AND to_node=?)', (n1, n2, n2, n1))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "success", "message": f"Path between Node {n1} and {n2} is now BLOCKED!"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/smart_route', methods=['POST'])
+def smart_route():
+    try:
+        data = request.get_json()
+        room_id = data.get('room_id')
+        time_of_day = data.get('time_of_day')
+        is_emergency = data.get('is_emergency')
+        sensor_capacity = data.get('sensor_capacity')
+        start_node = data.get('start_node')
+        end_node = data.get('end_node')
+        crowd_density = predict_crowd(room_id, time_of_day, is_emergency, sensor_capacity)
+        print(f"🤖 ML Prediction: {crowd_density}")
+        graph, nodes = get_graph_from_db()
+        cost, path = dijkstra(graph, start_node, end_node, crowd_density=crowd_density)
+        if path:
+            path_names = [nodes.get(n, f"Unknown({n})") for n in path]
+            return jsonify({"status": "success", "predicted_crowd": crowd_density, "safest_path": path_names, "effective_cost": cost})
+        else:
+            return jsonify({"status": "error", "message": "No safe path found!"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
 
 if __name__ == '__main__':
-    print("🚀 Starting SafeFlow Server on http://127.0.0.1:5000")
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
